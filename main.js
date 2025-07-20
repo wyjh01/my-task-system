@@ -89,40 +89,163 @@ function handleAuthPage() {
 
 
 // ======================================================
-// 2. 任务面板页面 (dashboard.html) 的逻辑
+// 2. 任务面板页面 (dashboard.html) 的逻辑 (V2.0 全新升级)
 // ======================================================
 async function handleDashboardPage() {
     // 检查用户是否登录
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
         alert('请先登录！');
         window.location.href = 'index.html';
         return;
     }
 
-    // 显示用户信息
     const user = session.user;
     document.getElementById('user-email').textContent = user.email;
-    
-    // 加载任务列表
-    const taskList = document.getElementById('task-list');
-    const { data: tasks, error } = await supabase.from('tasks').select('*');
-    
-    if (error) {
-        console.error('获取任务失败', error);
-    } else {
-        if (tasks.length === 0) {
-            taskList.innerHTML = '<li>暂无任务</li>';
-        } else {
-            tasks.forEach(task => {
-                const li = document.createElement('li');
-                li.textContent = `任务名: ${task.title} - 链接: ${task.link}`;
-                taskList.appendChild(li);
-            });
-        }
+
+    // --- 核心逻辑开始 ---
+
+    const taskListElement = document.getElementById('task-list');
+
+    // 1. 获取所有属于该用户的任务
+    const { data: tasks, error: fetchError } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false }); // 按创建时间倒序
+
+    if (fetchError) {
+        console.error('获取任务失败', fetchError);
+        taskListElement.innerHTML = '<p class="text-danger">加载任务失败，请刷新页面。</p>';
+        return;
     }
+
+    if (tasks.length === 0) {
+        taskListElement.innerHTML = '<p>太棒了，当前没有任务！</p>';
+        return;
+    }
+
+    // 2. 检查是否存在“已领取”但未“回填”的任务
+    const hasPendingTask = tasks.some(task => task.status === '已领取');
+
+    // 3. 遍历任务，生成 HTML 卡片
+    taskListElement.innerHTML = ''; // 清空旧内容
+    tasks.forEach(task => {
+        const canClaim = !hasPendingTask; // 如果没有待办任务，则可以领取新任务
+
+        // 根据任务状态决定按钮和样式
+        let buttonsHTML = '';
+        let cardClass = '';
+
+        if (task.status === '未领取') {
+            cardClass = 'border-primary';
+            if (canClaim) {
+                buttonsHTML = `
+                    <button class="btn btn-primary btn-sm claim-btn" data-task-id="${task.id}">领取任务</button>
+                `;
+            } else {
+                buttonsHTML = `
+                    <button class="btn btn-secondary btn-sm" disabled>需先回填其他任务</button>
+                `;
+            }
+        } else if (task.status === '已领取') {
+            cardClass = 'border-warning';
+            buttonsHTML = `
+                <button class="btn btn-warning btn-sm submit-btn" data-task-id="${task.id}">回填任务</button>
+            `;
+        } else if (task.status === '已回填') {
+            cardClass = 'border-success';
+            buttonsHTML = `<p class="text-success mb-0">已于 ${new Date(task.submitted_at).toLocaleString()} 完成</p>`;
+        }
+        
+        // 创建任务卡片 HTML
+        const taskCardHTML = `
+            <div class="col-md-6 col-lg-4">
+                <div class="card task-card ${cardClass}">
+                    <div class="card-header fw-bold">
+                        ${task.title}
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text"><strong>链接:</strong> ${task.link}</p>
+                        <button class="btn btn-outline-secondary btn-sm me-2 copy-btn" data-text="${task.title}">复制名称</button>
+                        <button class="btn btn-outline-secondary btn-sm copy-btn" data-text="${task.link}">复制链接</button>
+                    </div>
+                    <div class="card-footer text-muted d-flex justify-content-between align-items-center">
+                        <span>状态: ${task.status}</span>
+                        <div>${buttonsHTML}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        taskListElement.insertAdjacentHTML('beforeend', taskCardHTML);
+    });
+
+    // 4. 为所有新生成的按钮添加事件监听
     
-    // 退出登录
+    // 复制按钮
+    document.querySelectorAll('.copy-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const textToCopy = e.target.dataset.text;
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                alert('已复制到剪贴板！');
+            }).catch(err => {
+                console.error('复制失败', err);
+                alert('复制失败！');
+            });
+        });
+    });
+
+    // 领取按钮
+    document.querySelectorAll('.claim-btn').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            const taskId = e.target.dataset.taskId;
+            if (confirm('确定要领取这个任务吗？')) {
+                const { error } = await supabase
+                    .from('tasks')
+                    .update({ 
+                        status: '已领取',
+                        claimed_at: new Date().toISOString() 
+                    })
+                    .eq('id', taskId);
+                
+                if (error) {
+                    alert('领取失败: ' + error.message);
+                } else {
+                    alert('领取成功！');
+                    location.reload(); // 刷新页面以更新状态
+                }
+            }
+        });
+    });
+
+    // 回填按钮
+    document.querySelectorAll('.submit-btn').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            const taskId = e.target.dataset.taskId;
+            const submission = prompt('请输入回填内容（例如，截图链接、文字说明等）:');
+            
+            if (submission !== null && submission.trim() !== '') {
+                const { error } = await supabase
+                    .from('tasks')
+                    .update({ 
+                        status: '已回填', 
+                        submitted_content: submission,
+                        submitted_at: new Date().toISOString() 
+                    })
+                    .eq('id', taskId);
+
+                if (error) {
+                    alert('回填失败: ' + error.message);
+                } else {
+                    alert('回填成功！感谢您的完成！');
+                    location.reload(); // 刷新页面
+                }
+            } else if(submission !== null) {
+                alert('回填内容不能为空！');
+            }
+        });
+    });
+
+    // 退出登录按钮
     document.getElementById('logout-button').addEventListener('click', async () => {
         await supabase.auth.signOut();
         window.location.href = 'index.html';

@@ -32,19 +32,44 @@ document.addEventListener('DOMContentLoaded', () => {
 // ======================================================
 function handleAuthPage() {
     const registerForm = document.getElementById('register-form');
-    registerForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const email = document.getElementById('register-email').value;
-        const password = document.getElementById('register-password').value;
-        
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-            alert('注册失败: ' + error.message);
-        } else {
-            alert('注册成功！请检查你的邮箱以完成验证，然后登录。');
-            // 注册成功后，Supabase会给用户发一封验证邮件。
-        }
-    });
+    // ...新的代码...
+    // 如果存在注册表单，才添加事件监听 (避免在登录页报错)
+    if (document.getElementById('register-form')) {
+        const registerForm = document.getElementById('register-form');
+        registerForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            
+            const { data, error } = await supabase.auth.signUp({ email, password });
+            if (error) {
+                alert('注册失败: ' + error.message);
+            } else {
+                // 修改这里！
+                alert('注册成功！请前往登录页面登录。');
+                // 自动跳转到登录页
+                window.location.href = 'index.html'; 
+            }
+        });
+    }
+
+    // 如果存在登录表单，才添加事件监听 (避免在注册页报错)
+    if (document.getElementById('login-form')) {
+        const loginForm = document.getElementById('login-form');
+        loginForm.addEventListener('submit', async (event) => {
+            // ...登录逻辑保持不变...
+            event.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) {
+                alert('登录失败: ' + error.message);
+            } else {
+                window.location.href = 'dashboard.html';
+            }
+        });
+    }
 
     const loginForm = document.getElementById('login-form');
     loginForm.addEventListener('submit', async (event) => {

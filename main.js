@@ -239,71 +239,160 @@ async function handleDashboardPage() {
     });
 }
 
-
 // ======================================================
-// 3. 管理员页面 (admin.html) 的逻辑 (V5.0 双模式)
+// 3. 管理员页面 (admin.html) 的逻辑 (V6.0 管理后台)
 // ======================================================
-function handleAdminPage() {
+async function handleAdminPage() {
+    // --- 1. 发布任务逻辑 (和V5.0一样) ---
     const addTaskForm = document.getElementById('add-task-form');
-    if (!addTaskForm) return;
-
-    const userIdWrapper = document.getElementById('user-id-wrapper');
-    const userIdInput = document.getElementById('user-id');
-    
-    document.querySelectorAll('input[name="taskType"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            if (e.target.value === 'private') {
-                userIdWrapper.style.display = 'block';
-                userIdInput.required = true;
-            } else {
+    if (addTaskForm) {
+        const userIdWrapper = document.getElementById('user-id-wrapper');
+        const userIdInput = document.getElementById('user-id');
+        document.querySelectorAll('input[name="taskType"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if (e.target.value === 'private') {
+                    userIdWrapper.style.display = 'block';
+                    userIdInput.required = true;
+                } else {
+                    userIdWrapper.style.display = 'none';
+                    userIdInput.required = false;
+                }
+            });
+        });
+        addTaskForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const title = document.getElementById('task-title').value;
+            const link = document.getElementById('task-link').value;
+            const taskType = document.querySelector('input[name="taskType"]:checked').value;
+            const messageEl = document.getElementById('admin-message');
+            let taskData = { title, link };
+            let errorMessage = '';
+            if (taskType === 'private') {
+                const userId = userIdInput.value;
+                if (!userId.trim()) { errorMessage = '指派模式下，用户ID不能为空！'; } 
+                else {
+                    taskData.is_private = true;
+                    taskData.user_id = userId;
+                    taskData.status = '已领取';
+                    taskData.claimed_at = new Date();
+                }
+            } else { taskData.is_private = false; }
+            if (errorMessage) { messageEl.textContent = errorMessage; messageEl.className = 'mt-3 alert alert-danger'; return; }
+            const { error } = await supabase.from('tasks').insert([taskData]);
+            if (error) { messageEl.textContent = '发布失败: ' + error.message; messageEl.className = 'mt-3 alert alert-danger'; } 
+            else {
+                messageEl.textContent = '任务发布成功！';
+                messageEl.className = 'mt-3 alert alert-success';
+                addTaskForm.reset();
                 userIdWrapper.style.display = 'none';
                 userIdInput.required = false;
+                loadTaskRecords(); // 发布成功后刷新任务记录
             }
         });
-    });
+    }
 
-    addTaskForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const title = document.getElementById('task-title').value;
-        const link = document.getElementById('task-link').value;
-        const taskType = document.querySelector('input[name="taskType"]:checked').value;
-        const messageEl = document.getElementById('admin-message');
-
-        let taskData = { title, link };
-        let errorMessage = '';
-
-        if (taskType === 'private') {
-            const userId = userIdInput.value;
-            if (!userId.trim()) {
-                errorMessage = '指派模式下，用户ID不能为空！';
-            } else {
-                taskData.is_private = true;
-                taskData.user_id = userId;
-                taskData.status = '已领取'; // 指派任务直接设为“已领取”状态
-                taskData.claimed_at = new Date();
-            }
-        } else {
-            taskData.is_private = false;
-            // status 会使用数据库默认值 '未领取'
-        }
+    // --- 2. 加载任务记录逻辑 ---
+    const taskRecordsTbody = document.getElementById('task-records-tbody');
+    async function loadTaskRecords() {
+        if (!taskRecordsTbody) return;
+        taskRecordsTbody.innerHTML = '<tr><td colspan="5">加载中...</td></tr>';
         
-        if (errorMessage) {
-            messageEl.textContent = errorMessage;
-            messageEl.className = 'mt-3 alert alert-danger';
+        // 我们需要关联查询，获取到用户的邮箱
+        const { data: tasks, error } = await supabase
+            .from('tasks')
+            .select(`*, user_profile:profiles(user_email:auth_users(email))`) // 这是一个简单的关联查询示例，可能需要调整
+            .order('created_at', { ascending: false });
+
+        if (error || !tasks) {
+            taskRecordsTbody.innerHTML = `<tr><td colspan="5" class="text-danger">加载失败: ${error?.message}</td></tr>`;
             return;
         }
 
-        const { data, error } = await supabase.from('tasks').insert([taskData]);
+        taskRecordsTbody.innerHTML = '';
+        tasks.forEach(task => {
+            // 注意：因为RLS，直接关联auth.users可能受限，我们先显示ID，后续可优化
+            const userIdentifier = task.user_id ? task.user_id.substring(0, 8) + '...' : 'N/A';
+            const row = `
+                <tr>
+                    <td>${task.title}</td>
+                    <td><span class="badge bg-info text-dark">${task.status}</span></td>
+                    <td>${userIdentifier}</td>
+                    <td>${task.submitted_content || '无'}</td>
+                    <td>${new Date(task.created_at).toLocaleString()}</td>
+                </tr>
+            `;
+            taskRecordsTbody.innerHTML += row;
+        });
+    }
 
-        if (error) {
-            messageEl.textContent = '发布失败: ' + error.message;
-            messageEl.className = 'mt-3 alert alert-danger';
-        } else {
-            messageEl.textContent = '任务发布成功！';
-            messageEl.className = 'mt-3 alert alert-success';
-            addTaskForm.reset();
-            userIdWrapper.style.display = 'none';
-            userIdInput.required = false;
+    // --- 3. 加载和管理用户逻辑 ---
+    const userListTbody = document.getElementById('user-list-tbody');
+    async function loadUsers() {
+        if (!userListTbody) return;
+        userListTbody.innerHTML = '<tr><td colspan="4">加载中...</td></tr>';
+        
+        // Supabase 的限制，不能直接从客户端查询 auth.users，但可以查询我们自己创建的 profiles 表
+        // 同时关联查询出用户的邮箱
+        const { data: profiles, error } = await supabase
+            .from('profiles')
+            .select(`id, is_banned, user_info:id(email, created_at)`);
+
+        if (error || !profiles) {
+            userListTbody.innerHTML = `<tr><td colspan="4" class="text-danger">加载用户失败: ${error?.message}</td></tr>`;
+            return;
         }
-    });
+
+        userListTbody.innerHTML = '';
+        profiles.forEach(profile => {
+            const isBanned = profile.is_banned;
+            const buttonText = isBanned ? '解封' : '拉黑';
+            const buttonClass = isBanned ? 'btn-success' : 'btn-danger';
+            const statusBadge = isBanned ? '<span class="badge bg-danger">已拉黑</span>' : '<span class="badge bg-success">正常</span>';
+            
+            const row = `
+                <tr>
+                    <td>${profile.user_info.email}</td>
+                    <td>${new Date(profile.user_info.created_at).toLocaleString()}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <button class="btn ${buttonClass} btn-sm ban-btn" data-user-id="${profile.id}" data-is-banned="${isBanned}">
+                            ${buttonText}
+                        </button>
+                    </td>
+                </tr>
+            `;
+            userListTbody.innerHTML += row;
+        });
+
+        // 为所有拉黑/解封按钮添加事件监听
+        document.querySelectorAll('.ban-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const userId = e.target.dataset.userId;
+                const currentIsBanned = e.target.dataset.isBanned === 'true';
+                const actionText = currentIsBanned ? '解封' : '拉黑';
+                
+                if (confirm(`确定要${actionText}这个用户吗？`)) {
+                    const { error } = await supabase
+                        .from('profiles')
+                        .update({ is_banned: !currentIsBanned })
+                        .eq('id', userId);
+                    
+                    if (error) {
+                        alert(`${actionText}失败: ${error.message}`);
+                    } else {
+                        alert(`用户已成功${actionText}！`);
+                        loadUsers(); // 刷新用户列表
+                    }
+                }
+            });
+        });
+    }
+
+    // --- 4. 页面加载时初始化 ---
+    loadTaskRecords();
+    loadUsers();
+
+    // 当切换到对应标签页时，也刷新一下数据
+    document.getElementById('records-tab')?.addEventListener('click', loadTaskRecords);
+    document.getElementById('users-tab')?.addEventListener('click', loadUsers);
 }

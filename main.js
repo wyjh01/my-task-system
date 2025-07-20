@@ -5,7 +5,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 // 2. 配置你的 Supabase 项目
 const SUPABASE_URL = 'https://qdugzdyeioanqosrhdga.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_HbvZh0CuBxiQaPuLxVd7hw_Nlp4yD7n';
+const SUPABASE_ANON_KEY = 'sb_publishable_HbvZh0CuBxiQaPuLxVd7hw_NIp4yD7n';
 
 // 3. 创建 Supabase 客户端
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);

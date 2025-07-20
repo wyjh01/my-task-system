@@ -1,20 +1,64 @@
-<!-- admin.html -->
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-    <meta charset="UTF-8">
-    <title>管理员后台</title>
-</head>
-<body>
-    <h1>发布新任务</h1>
-    <form id="add-task-form">
-        <label>任务名称: <input type="text" id="task-title" required></label><br>
-        <label>网盘链接: <input type="text" id="task-link" required></label><br>
-        <label>分配给用户ID: <input type="text" id="user-id" required></label><br>
-        <button type="submit">发布任务</button>
-    </form>
-    <p id="admin-message"></p>
+// main.js - 替换旧的 handleAdminPage 函数
 
-    <script type="module" src="main.js"></script>
-</body>
-</html>
+function handleAdminPage() {
+    const addTaskForm = document.getElementById('add-task-form');
+    if (!addTaskForm) return;
+
+    // 控制指派ID输入框的显示/隐藏
+    const userIdWrapper = document.getElementById('user-id-wrapper');
+    document.querySelectorAll('input[name="taskType"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'private') {
+                userIdWrapper.style.display = 'block';
+                document.getElementById('user-id').required = true;
+            } else {
+                userIdWrapper.style.display = 'none';
+                document.getElementById('user-id').required = false;
+            }
+        });
+    });
+
+    addTaskForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const title = document.getElementById('task-title').value;
+        const link = document.getElementById('task-link').value;
+        const taskType = document.querySelector('input[name="taskType"]:checked').value;
+        const messageEl = document.getElementById('admin-message');
+
+        let taskData = { title, link };
+        let errorMessage = '';
+
+        if (taskType === 'private') {
+            const userId = document.getElementById('user-id').value;
+            if (!userId.trim()) {
+                errorMessage = '指派模式下，用户ID不能为空！';
+            } else {
+                taskData.is_private = true;
+                taskData.user_id = userId;
+                taskData.status = '已领取'; // 指派任务直接设为“已领取”状态
+                taskData.claimed_at = new Date();
+            }
+        } else {
+            taskData.is_private = false;
+            // status 会使用数据库默认值 '未领取'
+        }
+        
+        if (errorMessage) {
+            messageEl.textContent = errorMessage;
+            messageEl.className = 'mt-3 alert alert-danger';
+            return;
+        }
+
+        const { data, error } = await supabase.from('tasks').insert([taskData]);
+
+        if (error) {
+            messageEl.textContent = '发布失败: ' + error.message;
+            messageEl.className = 'mt-3 alert alert-danger';
+        } else {
+            messageEl.textContent = '任务发布成功！';
+            messageEl.className = 'mt-3 alert alert-success';
+            addTaskForm.reset();
+            userIdWrapper.style.display = 'none'; // 重置UI
+        }
+    });
+}
